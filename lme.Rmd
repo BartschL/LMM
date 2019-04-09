@@ -1,0 +1,242 @@
+---
+title: "Linear gemischte Modelle zur Analyse von WHO Key Health Indicators"
+author: "L. Bartsch"
+date: "6 April 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+***
+### Fragestellung: Gibt es einen Zusammenhang zwischen den Gesundheitsausgaben eines Landes und der durchschnittlichen Lebenserwartung?  
+***
+
+Für die Untersuchung wurden ausgesuchte Angaben aus dem Bericht der World Health Organisation: [Core Health Indicators of WHO European Region 2017](http://www.euro.who.int/en/data-and-evidence/evidence-resources/core-health-indicators-in-the-who-european-region/core-health-indicators-in-the-who-european-region-2017.-special-focus-2030-sustainable-development-agenda-2017) genutzt. Die Untersuchung der Fragestellung wird anhand des R-Scriptes in diesem Dokument durchgeführt:  
+  
+#### Einlesen der Daten \  
+```{r read in data}
+rawData <- read.csv2('selected_WHO_Data.csv', sep = ';')
+# reset long column names
+longColumnNames <- colnames(rawData) # save long ones for later use
+colnames(rawData) <- c("Country", 
+                       "UrbPop", # Urban Population Rate
+                       "HealthExp", # estimates Health Expentiture as % from GDP
+                       "LifeExp", # Life Expectancy for both sex
+                       "Gini") # Gini Index
+#  first plot
+library(ggplot2)
+scattermatrix <- pairs(rawData[,2:5]) 
+
+```
+
+#### Kennwerte der Quelldaten
+```{r summary rawData, echo=FALSE}
+summary(rawData)
+```
+
+#### Fehlende Werte ersetzen
+Man sieht die Kennzahlen für die Variablen, sowie die Anzahl der nicht vorhandenen Einträge pro Spalte. Als nächstes wird die relative Häufigkeit der fehlenden Werte pro Variable berechnet. Vor allem für kleine Länder (Andorra, San Marino und Monaco) fehlen Werte für den Gini Index. 
+```{r explore missing}
+# missing values MCAR -> fix missing using MICE
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(rawData,2,pMiss) # Carefull: Gini Index have 5.5% NA
+```
+5,5% der Werte für den Gini Index fehlen. Diese relativ hohe Anzahl an NA Werten, kann sich auf die Qualität der anschließenden Analysen negativ auswirken. Mit dem mice package (*Multiple Imputations by Chained Equations*)  werden plausible synthetische Daten für die fehlenden Werte in Abhängigkeit aller Spalten des Datensatzes, berechnet. Das konkrete Verfahren das hier genutzt wurde, ist das predictive mean matching. 
+
+```{r recalc missing, warning = FALSE, results="hide", message = FALSE}
+
+library(mice)
+library(lattice)
+# use predictive mean matching from mice package for handling NA values
+tempData <- invisible(mice(rawData, 
+                 m = 5, # number of datasets to compute
+                 maxit = 50, 
+                 meth = 'pmm', 
+                 seed = 42, 
+                 printflat = FALSE))
+completeData = complete(tempData, 1)
+```
+
+```{r summary,echo = FALSE}
+summary(completeData)
+cat('Standard Deviation Gini Index before fixing missing values: ', sd(rawData$Gini, na.rm = TRUE), '\n',
+    'Standard Deviation Gini Index after fixing missing values: ', sd(completeData$Gini))
+```
+Ein Blick auf die Kennwerte zeigt, dass sich Kennwerte, wie _Mittelwerte_ oder die _Standard Abweichung_, nach dem Ersetzen der fehlenden Werte kaum geändert haben.   
+Jedoch muss hier angemerkt werden, dass die Methode aus dem *mice* package mehrere Werte pro _NA_ generiert und in diesem Beispiel willkürlich Daten gewählt wurden. Für eine gründliche Analyse müssten für jeden Satz generierter Werte alle nachfolgende Schritte berechnet werden und den Modellfehler, durch das Ersetzen, über die Risiduen abgeschätzt werden 
+
+#### Ausreißer 
+Nun wird überprüft inwiefern der Datensatz Ausreißer enthält. Dafür wird die Mahalanobis Entfernung genutzt. 
+```{r outliers}
+# outlier check using mahalanobis distance
+mahal = mahalanobis(completeData[, -c(1)], 
+                    colMeans(completeData[, -c(1)]), 
+                    cov(completeData[, -c(1)], use = "pairwise.complete.obs")) # mahalanobis distance for all data points
+cutoff = qchisq(1 - .001, ncol(completeData[, -c(1)])) # cutoff for 99.999% of all datapoints
+summary(mahal < cutoff)
+completeData = completeData[mahal < cutoff, ] #
+```
+
+Wie hier zu sehen ist, liegen für die obere Verteilung keine Ausreißer vor. (Für eine $\chi^{2}$ Funktion mit p = 99,99 wird Monaco, mit UrbPop = 100, allerdings als Ausreißer betrachtet).  
+
+#### Multikollinearität
+Anschließend wird untersucht inwieweit Multikollinearität vorliegt, um zu schauen ob mehrere Werte die selbe Eigenschaft messen. Dafür werden die Korrelationskoeffizienten berechnet und betrachtet ob hohe Koeffizienten (~0.9) vorhanden sind.
+
+```{r correlation}
+corrCoef <- cor(completeData[, -c(1)])
+symnum(corrCoef)
+```
+Wie man hier sehen kann liegen keine Korrelationen mit Werten betragsmäßg größer 0.6 vor. Somit liegt keine Multikollinearität vor. 
+  
+
+#### Modellerstellung
+Nun kann das grundlegende Modell *m0* erstellt werden, dass davon ausgeht das die Lebenserwartung vom Anteil der Gesundheitsausgaben eines Landes abhängen.  
+Die Null Hypothese für *m0* $H_0^{m0}$ nimmt somit an, dass es keinen signifikaten Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben eines Landes gibt.   
+
+Ein weiteres Modell *m1* bezieht den Anteil der urbanen Bevölkerungsrate als Kovarianz mit in das Modell ein. Die Null Hypothese $H_0^{m1}$ nimmt dabei an, dass durch das Einbeziehen der urbanen Bevölkerungsverteilung keine Varianz im Modell *m0* erklärt werden kann.
+
+Ein drittes Modell *mFull* bezieht sowohl die urbane Bevölkerungsverteilung als auch die Vermögensverteilung der jeweiligen Länder mit ein.  
+$H_0^{mFull}$ wird hierbei von $H_0^{m1}$ übernommen, mit dem Zusatz das der Gini Index eines Landes ebenso wenig Varianz im Modell *m0* erklären kann. 
+
+Die drei Modelle werden anschließend miteinander verglichen um das beste dieser drei Modelle, ausgehend von den gegebenen Daten, zu bestimmen. 
+```{r model}
+# y ~ x -> 
+formula0 = LifeExp ~ HealthExp # predict life expectancy from health expendencies
+formula1 = LifeExp ~ HealthExp + UrbPop # also use Urban Population Rate 
+formulaFull = LifeExp ~ HealthExp + UrbPop + Gini # now take Gini Index on top
+```
+
+Zuerst wird *m0*, das Modell ohne Korrekturen, betrachtet. 
+```{r fillmodel}
+# no covariates
+m0 <- lm(formula0, data = completeData)
+summary(m0)
+```
+Nach den Signifikanz-Codes der Zusammenfassung, zeigt das Modell ein Zusammenhang zwischen den Gesundheitsausgaben und der Lebenserwartung. 
+Die Regressionslinie zeigt das, dass Modell im Mittel für eine zehnprozentige Erhöhung der Gesundheitsausgaben, eine Erhöhung der durchschnittlichen Lebenserwarung um ca. vier Jahre prognostiziert. Innerhalb des 95% Konfidenzintervalles des Modelles kann dieser Zusammenhang stärker oder schwächer ausfallen, bleibt jedoch positiv.  
+
+$H_0^{m0}$ wird damit widerlegt und es existiert ein Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben. 
+```{r check model}
+# compute the models confidence interval and plot
+newx = seq(min(completeData$HealthExp), max(completeData$HealthExp), by = 0.05)
+conf_interval0 <- predict(m0, newdata=data.frame(HealthExp=newx), interval="confidence", level=0.95)
+plot(completeData$HealthExp, completeData$LifeExp, main="Regression für m0")
+abline(m0, col="lightblue")
+lines(newx, conf_interval0[,2], col="blue", lty=2)
+lines(newx, conf_interval0[,3], col="blue", lty=2)
+grid (NULL,NULL, lty = 6, col = "cornsilk2") 
+```
+
+#### Einschub: Normalverteilung prüfen
+An dieser Stelle wird nun überprüft inwieweit die Daten normalverteilt sind. Dafür werden die Residuen des Modells *m0* auf Normalverteilung überprüft, unter der Annahme, dass die Daten auf denen das Modell beruht normalverteilt sind, wenn die Residuen des Modelles auch normal verteilt sind. 
+
+```{r normality}
+# shapiro wilk test
+shapiro.test(m0$residuals)
+normalDist = rnorm(length(m0$residuals))
+# qqplot of risidual
+qqnorm(m0$residuals);qqline(m0$residuals, col = 2)
+
+```
+
+In diesem Fall deutet der Shapiro-Wilk Test mit $p-value > 0.05$ darauf hin, das die Fehler und somit die Daten des Modelles nicht signifikant verschieden zu einer Normalverteilung sind. Im Quantil-Quantil Diagramm der Residuen kann zudem beobachtet werden, das der Modellfehler einer Normalverteilung folgt. Daraus kann nun geschlossen werden, dass auch die Daten, auf denen das Modell beruht, normal verteilt sind. 
+
+#### Modell m1
+Nun wird Modell *m1* berechnet. Hierbei wird die urbane Bevölkerungsverteilung in die Lineare Regression miteinbezogen. 
+
+```{r m1}
+# now with covariates
+m1 = lm(formula1, data = completeData)
+summary(m1)
+```
+
+```{r m1 plot}
+#plot(completeData$HealthExp, completeData$Lifeexp, main="Regression")
+#abline(m1, col="lightblue")
+# compute the models confidence interval and plot
+newx = seq(min(completeData$HealthExp), max(completeData$HealthExp), by = 0.05)
+conf_interval1 <- predict(m1, newdata=data.frame(HealthExp=newx, UrbPop=mean(completeData$UrbPop)), interval="confidence", level=0.95)
+#plot(completeData$HealthExp, completeData$Lifeexp, main="Regression")
+#abline(mFull, col="lightblue")
+plot(newx, conf_interval1[,1], col="darkgreen", type = 'l', lty=1, lwd = 2, xlim=c(2, 12), ylim=c(75, 84), main="Regression für m0 und m1")
+lines(newx, conf_interval1[,2], col="green", lty=2)
+lines(newx, conf_interval1[,3], col="green", lty=2)
+
+
+lines(newx, conf_interval0[,1], col = "black", lty = 2, lwd = 3)
+lines(newx, conf_interval0[,2], col = "darkgray", lty = 2, lwd = 2)
+lines(newx, conf_interval0[,3], col = "darkgray", lty = 2, lwd = 2)
+grid (NULL,NULL, lty = 6, col = "cornsilk2") 
+legend(2, 84, legend = c("m1", "m0"),
+       col = c("darkgreen", "black"), lwd = 2, lty = 1:2, cex = 0.8)
+```
+  
+*m1* zeigt nun für die Erhöhung der Gesundheitsausgaben einen geringeren Effekt auf die Lebenserwartung.  
+Allgemein haben Modelle mit mehr Variablen die Tendenz Daten besser zu beschreiben. Bei *m1* könnte es sich hierbei jedoch um Overfitting handeln. Mittels AIC (*Akaike Information Criterion*) kann die Güte der Modell bewertet und verglichen werden. Der AIC bezieht dabei den erhöhten Freiheitsgrad des Modelles *m1* mit ein. Man erhält dadurch ein Gütekriterium das diesem Umstand mitbetrachtet. Kleinere Werte des AIC deuten hierbei auf eine höhere Modellgüte hin. 
+  
+#### Vergleich der Modelle m0 und m1. 
+``` {r comparision}
+# Calculate AIC 
+AIC(m0)
+AIC(m1)
+
+# test if with covariates is any better
+summary(m1)
+anova(m0, m1)
+```
+Durch die Änderung des Modelles, mit dem Einbezug der urbanen Bevölkerungsrate, kann Varianz in den Daten besser beschrieben werden ($r^{2}_{m1} = 0.38$ verglichen mit $r^{2}_{m0} = 0.17$). Somit kann angenommen werden das, dass Modell *m1* den Zusammenhang zwischen den Gesundheitsausgaben und der Lebenserwartung genauer beschreibt als das Modell *m0*. Der Einfluss der Gesundheitsausgaben auf die Lebenserwartung fällt also geringer aus, als durch das Modell *m0* vorhergesagt. Sowohl die ANOVA als auch der AIC weisen auf ein Modell hin, dass über eine größere Güte verfügt und die Varianz der vorliegenden Daten besser erklärt. 
+
+$H_0^{m1}$ wird somit verworfen, da der Effekt der urbane Bevölkerungsverteilung auf den Zusammenhang zwischen durchschnittlicher Lebenserwartung und Gesundheitsausgaben genauer beschreibt als das Modell *m0*. 
+  
+#### Modell mFull
+Nun wird das Modell, dass sowohl die Bevölkerungsverteilung als auch den Gini-Index berücksichtigt, betrachtet.
+```{r mFull}
+# now with two covariates
+mFull = lm(formulaFull, data = completeData)
+summary(mFull)
+```
+
+#### Plot der Modelle m1 und mFull
+```{r mFull plot}
+# compute the models confidence interval and plot
+newx = seq(min(completeData$HealthExp), max(completeData$HealthExp), by = 0.05)
+conf_interval_Full <- predict(mFull, newdata = data.frame(HealthExp = newx, UrbPop = mean(completeData$UrbPop), Gini = mean(completeData$Gini)), interval = "confidence", level = 0.95)
+
+plot(newx, conf_interval1[,1], col="darkgreen", type = 'l', lty=2, xlim=c(2, 12), ylim=c(72, 83), main="Regression für m1 und mFull")
+lines(newx, conf_interval1[,2], col="green", lty=1)
+lines(newx, conf_interval1[,3], col="green", lty=1)
+
+
+lines(newx, conf_interval_Full[,1], col="darkred", lty=1)
+lines(newx, conf_interval_Full[,2], col="red", lty=2)
+lines(newx, conf_interval_Full[,3], col="red", lty=2)
+
+grid (NULL,NULL, lty = 6, col = "cornsilk2") 
+legend(2, 82, legend = c("mFull", "m1"),
+       col = c("darkred", "darkgreen"), lwd = 2, lty = 1:2, cex = 0.8)
+```
+  
+#### Vergleich aller Modelle
+``` {r comparision all}
+# Calculate AIC 
+AIC(m0)
+AIC(m1)
+AIC(mFull)
+
+
+# test if with both covariates is any better
+summary(mFull)
+anova(m0, m1, mFull)
+```
+Das hinzufügen des Gini Indexes hat die Prognose der Lebenserwartung nicht signifikant verbessert, da sowohl die Unterschiede der Regressionslinien gering sind, als auch der $r^{2}$ Wert sich von *m1* zu *mFull* nicht geändert hat. Somit kann das Modell mFull, zugunsten des Modelles *m1* verworfen werden. 
+
+Die Nullhypothese $H_0^{mFull}$ wurde somit bestätigt. 
+
+#### Zusammenfassung
+Mit den vorliegenden Daten kann ein Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben eines Landes gezeigt werden. Durch die Einbeziehung des urbanen Bevölkerungsanteiles, konnte die Varianz der Daten verringert und die Genauigkeit des Modells erhöht werden. 
+
+
+#### Ausblick
+Da im WHO Bericht weitere Daten vorhanden sind, kann die Analyse auf weitere mögliche Faktoren ausgeweitet werden. Zusätzlich kann durch das Hinzufügen weiterer Daten (z.B. Core Health Indicators für die Jahre 2012 bis 2016) das Modell um zufällige Effekte (z.B. Jahr) erweitert werden, um die Datenbasis und die Modellgenauigkeit bezüglich der oberen Fragestellung zu erhöhen. 
