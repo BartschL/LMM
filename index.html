@@ -391,7 +391,7 @@ completeData = complete(tempData, 1)</code></pre>
 <pre><code>## Standard Deviation Gini Index before fixing missing values:  5.300909 
 ##  Standard Deviation Gini Index after fixing missing values:  5.177054</code></pre>
 <p>Ein Blick auf die Kennwerte zeigt, dass sich Kennwerte, wie <em>Mittelwerte</em> oder die <em>Standard Abweichung</em>, nach dem Ersetzen der fehlenden Werte kaum geändert haben.<br />
-Jedoch muss hier angemerkt werden, dass die Methode aus dem <em>mice</em> package mehrere Werte pro <em>NA</em> generiert und in diesem Beispiel willkürlich Daten gewählt wurden. Für eine gründliche Analyse müssten für jeden Satz generierter Werte alle nachfolgende Schritte berechnet werden und den Modellfehler, durch das Ersetzen, über die Risiduen abgeschätzt werden</p>
+Jedoch muss hier angemerkt werden, dass die Methode aus dem <em>mice</em> package mehrere Werte pro <em>NA</em> generiert. In diesem Beispiel wurden willkürlich Daten gewählt. Für eine gründliche Analyse müssten für jeden Satz generierter Werte alle der nachfolgenden Schritte berechnet werden. Der Modellfehler der durch das Ersetzen der <em>NA</em> Werte entsteht, kann dann über die Residuen abgeschätzt werden.</p>
 </div>
 <div id="ausreier" class="section level4">
 <h4>Ausreißer</h4>
@@ -409,7 +409,7 @@ summary(mahal &lt; cutoff)</code></pre>
 </div>
 <div id="multikollinearitat" class="section level4">
 <h4>Multikollinearität</h4>
-<p>Anschließend wird untersucht inwieweit Multikollinearität vorliegt, um zu schauen ob mehrere Werte die selbe Eigenschaft messen. Dafür werden die Korrelationskoeffizienten berechnet und betrachtet ob hohe Koeffizienten (~0.9) vorhanden sind.</p>
+<p>Anschließend wird untersucht inwieweit Multikollinearität vorliegt, um zu schauen ob mehrere Werte die selbe Eigenschaft messen. Dafür werden die Korrelationskoeffizienten berechnet und betrachtet, ob hohe Koeffizienten (~0.9) vorhanden sind.</p>
 <pre class="r"><code>corrCoef &lt;- cor(completeData[, -c(1)])
 symnum(corrCoef)</code></pre>
 <pre><code>##           U H L G
@@ -423,8 +423,8 @@ symnum(corrCoef)</code></pre>
 </div>
 <div id="modellerstellung" class="section level4">
 <h4>Modellerstellung</h4>
-<p>Nun kann das grundlegende Modell <em>m0</em> erstellt werden, dass davon ausgeht das die Lebenserwartung vom Anteil der Gesundheitsausgaben eines Landes abhängen.<br />
-Die Null Hypothese für <em>m0</em> <span class="math inline">\(H_0^{m0}\)</span> nimmt somit an, dass es keinen signifikaten Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben eines Landes gibt.</p>
+<p>Nun kann das grundlegende Modell <em>m0</em> erstellt werden, dass davon ausgeht das die durchschnittliche Lebenserwartung vom Anteil der Gesundheitsausgaben eines Landes abhängt.<br />
+Die Null Hypothese für <em>m0</em> <span class="math inline">\(H_0^{m0}\)</span> sagt somit aus, dass es keinen signifikaten Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben eines Landes gibt.</p>
 <p>Ein weiteres Modell <em>m1</em> bezieht den Anteil der urbanen Bevölkerungsrate als Kovarianz mit in das Modell ein. Die Null Hypothese <span class="math inline">\(H_0^{m1}\)</span> nimmt dabei an, dass durch das Einbeziehen der urbanen Bevölkerungsverteilung keine Varianz im Modell <em>m0</em> erklärt werden kann.</p>
 <p>Ein drittes Modell <em>mFull</em> bezieht sowohl die urbane Bevölkerungsverteilung als auch die Vermögensverteilung der jeweiligen Länder mit ein.<br />
 <span class="math inline">\(H_0^{mFull}\)</span> wird hierbei von <span class="math inline">\(H_0^{m1}\)</span> übernommen, mit dem Zusatz das der Gini Index eines Landes ebenso wenig Varianz im Modell <em>m0</em> erklären kann.</p>
@@ -455,7 +455,7 @@ summary(m0)</code></pre>
 ## Residual standard error: 3.951 on 52 degrees of freedom
 ## Multiple R-squared:  0.1769, Adjusted R-squared:  0.161 
 ## F-statistic: 11.17 on 1 and 52 DF,  p-value: 0.001544</code></pre>
-<p>Nach den Signifikanz-Codes der Zusammenfassung, zeigt das Modell ein Zusammenhang zwischen den Gesundheitsausgaben und der Lebenserwartung. Die Regressionslinie zeigt das, dass Modell im Mittel für eine zehnprozentige Erhöhung der Gesundheitsausgaben, eine Erhöhung der durchschnittlichen Lebenserwarung um ca. vier Jahre prognostiziert. Innerhalb des 95% Konfidenzintervalles des Modelles kann dieser Zusammenhang stärker oder schwächer ausfallen, bleibt jedoch positiv.</p>
+<p>Nach den Signifikanz-Codes der Zusammenfassung, zeigt das Modell ein Zusammenhang zwischen den Gesundheitsausgaben und der Lebenserwartung. Die Regressionslinie zeigt zudem das, dass Modell im Mittel für eine zehnprozentige Erhöhung der Gesundheitsausgaben, eine Erhöhung der durchschnittlichen Lebenserwarung um ca. vier Jahre prognostiziert. Innerhalb des 95% Konfidenzintervalles kann dieser Zusammenhang stärker oder schwächer ausfallen, bleibt jedoch positiv.</p>
 <p><span class="math inline">\(H_0^{m0}\)</span> wird damit widerlegt und es existiert ein Zusammenhang zwischen der durchschnittlichen Lebenserwartung und den Gesundheitsausgaben.</p>
 <pre class="r"><code># compute the models confidence interval and plot
 newx = seq(min(completeData$HealthExp), max(completeData$HealthExp), by = 0.05)
